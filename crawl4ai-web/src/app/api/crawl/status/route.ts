@@ -1,39 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateRequest } from '@/app/_middleware/validate-request';
+import { statusCheckSchema } from '@/validations/crawl';
+import { CrawlResult } from '@/types/crawl4ai';
 
-// This would typically come from the main crawl route
-// For now, we'll use a simple in-memory store
-const activeJobs = new Map<string, {
-  status: 'pending' | 'running' | 'completed' | 'failed';
+// Define the job status type
+type JobStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+// Define the job interface
+interface Job {
+  status: JobStatus;
   progress?: number;
   current_url?: string;
-  results?: unknown[];
+  results?: CrawlResult[];
   error?: string;
   start_time: number;
-}>();
+}
+
+// In-memory store for jobs (in production, use a database)
+const activeJobs = new Map<string, Job>();
 
 // Cleanup old jobs periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [jobId] of activeJobs.entries()) {
-    const job = activeJobs.get(jobId);
-    if (job && now - job.start_time > 30 * 60 * 1000) { // 30 minutes timeout
-      activeJobs.delete(jobId);
+const JOB_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Initialize cleanup interval
+let cleanupInitialized = false;
+
+function initializeCleanup() {
+  if (cleanupInitialized) return;
+  
+  setInterval(() => {
+    const now = Date.now();
+    for (const [jobId, job] of activeJobs.entries()) {
+      if (now - job.start_time > JOB_TIMEOUT_MS) {
+        activeJobs.delete(jobId);
+      }
     }
-  }
-}, 5 * 60 * 1000); // Check every 5 minutes
+  }, CLEANUP_INTERVAL_MS);
+  
+  cleanupInitialized = true;
+}
+
+// Initialize cleanup on first import
+initializeCleanup();
+
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const { searchParams } = new URL(request.url);
-    const jobId = searchParams.get('job_id');
+    // Validate request with rate limiting
+    const validation = await validateRequest(request, {
+      schema: statusCheckSchema,
+      rateLimit: true,
+      requireAuth: true,
+    });
 
-    if (!jobId) {
-      return NextResponse.json(
-        { success: false, error: 'job_id parameter is required' },
-        { status: 400 }
-      );
+    if (validation instanceof NextResponse) {
+      return validation;
     }
 
+    const { job_id: jobId } = validation.data;
     const job = activeJobs.get(jobId);
 
     if (!job) {
@@ -52,7 +77,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       error: job.error,
       start_time: job.start_time,
       elapsed_time: Date.now() - job.start_time
-    }, { status: 200 });
+    }, { 
+      status: 200,
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
 
   } catch (error) {
     console.error('Status API error:', error);
@@ -69,13 +99,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // Helper function to update job status (called by main crawl route)
 export function updateJobStatus(
   jobId: string,
-  updates: Partial<{
-    status: 'pending' | 'running' | 'completed' | 'failed';
-    progress?: number;
-    current_url?: string;
-    results?: unknown[];
-    error?: string;
-  }>
+  updates: Partial<Omit<Job, 'start_time'>>
 ): void {
   const existingJob = activeJobs.get(jobId);
   if (existingJob) {
@@ -93,11 +117,27 @@ export function updateJobStatus(
 }
 
 // Helper function to create new job
-export function createJob(jobId: string): void {
+export function createJob(jobId: string, initialData: Partial<Job> = {}): void {
   activeJobs.set(jobId, {
     status: 'pending',
-    start_time: Date.now()
+    start_time: Date.now(),
+    ...initialData,
   });
+}
+
+// Helper function to get job status
+export function getJobStatus(jobId: string): Job | undefined {
+  return activeJobs.get(jobId);
+}
+
+// Helper function to check if job exists
+export function jobExists(jobId: string): boolean {
+  return activeJobs.has(jobId);
+}
+
+// Helper function to get all active job IDs
+export function getActiveJobIds(): string[] {
+  return Array.from(activeJobs.keys());
 }
 
 // Helper function to remove job

@@ -2,13 +2,48 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
+import { validateRequest } from '@/app/_middleware/validate-request';
+import { exportRequestSchema } from '@/validations/crawl';
+import { CrawlResult } from '@/types/crawl4ai';
 
-// Types
-interface ExportRequest {
-  format: 'json' | 'csv' | 'pdf';
-  data: unknown;
-  filename?: string;
+// In-memory store for export files (in production, use a persistent storage)
+const EXPORT_FILE_TTL = 60 * 60 * 1000; // 1 hour
+const EXPORT_CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
+
+interface ExportFileInfo {
+  filepath: string;
+  created: number;
+  mimetype: string;
+  filename: string;
 }
+
+const exportFiles = new Map<string, ExportFileInfo>();
+
+// Cleanup old export files periodically
+let cleanupInitialized = false;
+
+function initializeCleanup() {
+  if (cleanupInitialized) return;
+  
+  setInterval(async () => {
+    const now = Date.now();
+    for (const [exportId, fileInfo] of exportFiles.entries()) {
+      if (now - fileInfo.created > EXPORT_FILE_TTL) {
+        try {
+          await fs.unlink(fileInfo.filepath);
+          exportFiles.delete(exportId);
+        } catch (error) {
+          console.error('Failed to clean up export file:', error);
+        }
+      }
+    }
+  }, EXPORT_CLEANUP_INTERVAL);
+  
+  cleanupInitialized = true;
+}
+
+// Initialize cleanup on first import
+initializeCleanup();
 
 interface ExportResponse {
   success: boolean;
@@ -16,19 +51,6 @@ interface ExportResponse {
   error?: string;
 }
 
-// Store generated export files temporarily
-const exportFiles = new Map<string, { filepath: string; created: number }>();
-
-// Cleanup old export files periodically
-setInterval(() => {
-  const now = Date.now();
-  for (const [exportId, fileInfo] of exportFiles.entries()) {
-    if (now - fileInfo.created > 60 * 60 * 1000) { // 1 hour timeout
-      fs.unlink(fileInfo.filepath).catch(console.error);
-      exportFiles.delete(exportId);
-    }
-  }
-}, 10 * 60 * 1000); // Check every 10 minutes
 
 function convertToCSV(data: unknown[]): string {
   if (!Array.isArray(data) || data.length === 0) {
@@ -115,7 +137,13 @@ function generatePDFContent(data: unknown): string {
   return htmlContent;
 }
 
-async function generateExportFile(request: ExportRequest): Promise<{ filepath: string; filename: string }> {
+async function generateExportFile(
+  request: {
+    format: 'json' | 'csv' | 'pdf';
+    data: CrawlResult | CrawlResult[];
+    filename?: string;
+  }
+): Promise<{ filepath: string; filename: string; mimetype: string }> {
   const exportId = randomUUID();
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const baseFilename = request.filename || `crawl4ai-export-${timestamp}`;
@@ -158,33 +186,38 @@ async function generateExportFile(request: ExportRequest): Promise<{ filepath: s
     created: Date.now()
   });
 
-  return { filepath, filename };
+  return { filepath, filename, mimetype };
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: ExportRequest = await request.json();
+    // Validate request with rate limiting
+    const validation = await validateRequest(request, {
+      schema: exportRequestSchema,
+      rateLimit: true,
+      requireAuth: true,
+    });
 
-    // Validate request
-    if (!body.format || !['json', 'csv', 'pdf'].includes(body.format)) {
-      return NextResponse.json(
-        { success: false, error: 'Valid format (json, csv, pdf) is required' },
-        { status: 400 }
-      );
+    if (validation instanceof NextResponse) {
+      return validation;
     }
 
-    if (!body.data) {
-      return NextResponse.json(
-        { success: false, error: 'Data is required' },
-        { status: 400 }
-      );
-    }
+    const body = validation.data;
 
     // Generate export file
-    const { filepath, filename } = await generateExportFile(body);
+    const { filepath, filename, mimetype } = await generateExportFile(body);
+    const exportId = randomUUID();
 
-    // Return download URL
-    const downloadUrl = `/api/crawl/export/download?file=${encodeURIComponent(filename)}`;
+    // Store file info for download
+    exportFiles.set(exportId, {
+      filepath,
+      filename,
+      mimetype,
+      created: Date.now(),
+    });
+
+    // Return download URL with export ID
+    const downloadUrl = `/api/crawl/export/download?id=${exportId}`;
 
     return NextResponse.json({
       success: true,
@@ -208,50 +241,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const { searchParams } = new URL(request.url);
-    const filename = searchParams.get('file');
+    const exportId = searchParams.get('id');
 
-    if (!filename) {
+    if (!exportId) {
       return NextResponse.json(
-        { success: false, error: 'file parameter is required' },
+        { success: false, error: 'Export ID is required' },
         { status: 400 }
       );
     }
 
-    const filepath = path.join('/tmp', filename);
+    const fileInfo = exportFiles.get(exportId);
+    if (!fileInfo) {
+      return NextResponse.json(
+        { success: false, error: 'Export not found or expired' },
+        { status: 404 }
+      );
+    }
 
     // Check if file exists
     try {
-      await fs.access(filepath);
+      await fs.access(fileInfo.filepath);
     } catch {
+      exportFiles.delete(exportId);
       return NextResponse.json(
         { success: false, error: 'File not found' },
         { status: 404 }
       );
     }
 
-    // Read and return file
-    const content = await fs.readFile(filepath, 'utf8');
+    // Read file
+    const content = await fs.readFile(fileInfo.filepath, 'utf8');
+    const { filename, mimetype } = fileInfo;
 
-    // Determine content type
-    const ext = path.extname(filename).toLowerCase();
-    let contentType = 'application/octet-stream';
-
-    switch (ext) {
-      case '.json':
-        contentType = 'application/json';
-        break;
-      case '.csv':
-        contentType = 'text/csv';
-        break;
-      case '.html':
-        contentType = 'text/html';
-        break;
-    }
-
-    // Clean up file after serving
-    setTimeout(async () => {
+    // Schedule file cleanup
+    setTimeout(() => {
       try {
-        await fs.unlink(filepath);
+        fs.unlink(fileInfo.filepath).catch(console.error);
+        exportFiles.delete(exportId);
       } catch (error) {
         console.error('Failed to clean up export file:', error);
       }
@@ -259,10 +285,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     return new NextResponse(content, {
       headers: {
-        'Content-Type': contentType,
+        'Content-Type': mimetype,
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Cache-Control': 'no-cache'
-      }
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
     });
 
   } catch (error) {

@@ -6,6 +6,8 @@ from functools import partial
 from uuid import uuid4
 from datetime import datetime
 from base64 import b64encode
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 
 import logging
 from typing import Optional, AsyncGenerator
@@ -22,7 +24,7 @@ from crawl4ai import (
     CacheMode,
     BrowserConfig,
     MemoryAdaptiveDispatcher,
-    RateLimiter, 
+    RateLimiter,
     LLMConfig
 )
 from crawl4ai.utils import perform_completion_with_backoff
@@ -48,6 +50,72 @@ from utils import (
 import psutil, time
 
 logger = logging.getLogger(__name__)
+
+async def upload_results_to_minio(results, task_id=None):
+    """Upload crawl results to MinIO bucket."""
+    try:
+        endpoint = os.getenv('MINIO_ENDPOINT', 'http://minio:9000')
+        access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+        secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+        bucket = os.getenv('MINIO_BUCKET', 'crawl-results')
+        region = os.getenv('MINIO_REGION', 'us-east-1')
+
+        s3_client = boto3.client(
+            's3',
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region
+        )
+
+        # Create bucket if not exists
+        try:
+            s3_client.head_bucket(Bucket=bucket)
+        except ClientError:
+            s3_client.create_bucket(Bucket=bucket)
+
+        # Generate unique key
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        if task_id:
+            key = f"crawls/{task_id}/{timestamp}_results.json"
+        else:
+            key = f"crawls/{timestamp}_{uuid4().hex[:8]}_results.json"
+
+        # Prepare results for upload (ensure no bytes, all serializable)
+        upload_results = []
+        for result in results:
+            result_dict = result.model_dump()
+            if result_dict.get('pdf') is not None:
+                # Upload PDF separately if present
+                pdf_key = key.replace('_results.json', '_pdf.pdf')
+                s3_client.put_object(Bucket=bucket, Key=pdf_key, Body=result.pdf)
+                result_dict['pdf'] = f"s3://{bucket}/{pdf_key}"
+            # Handle media: upload base64 images if present
+            if 'media' in result_dict and result_dict['media']:
+                media_dir = key.replace('_results.json', '/media/')
+                for media_type, items in result_dict['media'].items():
+                    for i, item in enumerate(items):
+                        if 'data' in item and item['data'].startswith('data:'):
+                            # Extract base64 data
+                            base64_data = item['data'].split(',')[1]
+                            media_key = f"{media_dir}{media_type}/{i}.bin"
+                            s3_client.put_object(Bucket=bucket, Key=media_key, Body=base64.b64decode(base64_data))
+                            item['data'] = f"s3://{bucket}/{media_key}"
+            upload_results.append(result_dict)
+
+        # Upload JSON
+        s3_client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(upload_results, default=str).encode('utf-8'),
+            ContentType='application/json'
+        )
+
+        return f"s3://{bucket}/{key}"
+
+    except (NoCredentialsError, ClientError) as e:
+        logger.error(f"MinIO upload error: {e}")
+        return None
 
 # --- Helper to get memory ---
 def _get_memory_mb():

@@ -21,15 +21,18 @@ export async function rateLimit(ip: string): Promise<{ allowed: boolean; headers
       allowed: true,
       headers,
     };
-  } catch (res: any) {
+  } catch (error) {
+    const rateLimitError = error as { msBeforeNext: number };
+    const headers = {
+      'Retry-After': String(rateLimitError.msBeforeNext / 1000),
+      'X-RateLimit-Limit': '100',
+      'X-RateLimit-Remaining': '0',
+      'X-RateLimit-Reset': new Date(Date.now() + rateLimitError.msBeforeNext).toISOString(),
+    };
+    
     return {
       allowed: false,
-      headers: {
-        'Retry-After': String(res.msBeforeNext / 1000),
-        'X-RateLimit-Limit': '100',
-        'X-RateLimit-Remaining': '0',
-        'X-RateLimit-Reset': new Date(Date.now() + res.msBeforeNext).toISOString(),
-      },
+      headers,
       error: 'Too Many Requests',
     };
   }
