@@ -70,3 +70,22 @@ model Crawler {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model WebhookEvent {
+  id             String   @id @default(cuid())
+  deliveryId     String   @unique
+  event          String
+  action         String?
+  repositoryId   String?
+  repositoryName String?
+  senderId       String?
+  senderLogin    String?
+  status         String
+  payload        Json
+  processedAt    DateTime @default(now())
+  
+  @@index([event])
+  @@index([repositoryId])
+  @@index([senderId])
+  @@index([status])
+}

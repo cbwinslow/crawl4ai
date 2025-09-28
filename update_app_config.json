@@ -1,0 +1,24 @@
+{
+  "name": "cloudcurio-oauth",
+  "homepage_url": "https://cloudcurio.cc",
+  "callback_urls": ["https://cloudcurio.cc/api/auth/callback/github"],
+  "webhook_active": true,
+  "webhook_url": "https://cloudcurio.cc/api/webhooks/github",
+  "events": [
+    "push",
+    "pull_request",
+    "issues",
+    "issue_comment",
+    "deployment_status",
+    "workflow_run"
+  ],
+  "permissions": {
+    "actions": "write",
+    "contents": "write",
+    "deployments": "write",
+    "issues": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "statuses": "write"
+  }
+}
