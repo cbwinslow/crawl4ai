@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, Loader2 } from 'lucide-react';
+import { ChevronLeft, Loader2, Search } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AVAILABLE_CRAWLERS } from '@/config/crawlers';
@@ -120,16 +120,6 @@ function CrawlerSelection({ onSelectCrawler }: { onSelectCrawler: (id: string) =
     </div>
   );
 }
-    verbose: true
-  });
-
-  const [llmConfig, setLlmConfig] = useState<Partial<LLMConfig>>({
-    provider: "openai",
-    temperature: 0.7,
-    max_tokens: 1000
-  });
-
-  // Crawl state
   const [isCrawling, setIsCrawling] = useState(false);
   const [crawlResult, setCrawlResult] = useState<CrawlResponse | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
