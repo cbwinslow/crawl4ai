@@ -189,31 +189,3 @@ async function parseRequestBody(request: NextRequest): Promise<unknown> {
     return {};
   }
 }
-            })),
-          },
-          { status: 400 }
-        );
-      }
-
-      // Return the parsed data to be used in the route handler
-      return { success: true, data: result.data };
-    } catch (error) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid JSON body' },
-        { status: 400 }
-      );
-    }
-  }
-
-  // If no validation needed, return success
-  return { success: true };
-}
-
-// Replace with your actual API key validation logic
-async function validateApiKey(apiKey: string | undefined): Promise<boolean> {
-  if (!apiKey) return false;
-  
-  // In a real application, you would validate against a database or auth service
-  // This is a placeholder implementation
-  return process.env.API_KEYS?.split(',').includes(apiKey) ?? false;
-}

@@ -15,10 +15,10 @@ const proxyConfigSchema = z.object({
   server: z.string(),
   username: z.string().optional(),
   password: z.string().optional(),
-  ip: z.string().ip().optional(),
+  ip: z.string().optional(),
 });
 
-const browserConfigSchema: z.ZodType<Partial<BrowserConfig>> = z.object({
+const browserConfigSchema = z.object({
   browser_type: z.nativeEnum(BrowserType).optional(),
   headless: z.boolean().optional(),
   browser_mode: z.nativeEnum(BrowserMode).optional(),
@@ -41,10 +41,10 @@ const browserConfigSchema: z.ZodType<Partial<BrowserConfig>> = z.object({
   ignore_https_errors: z.boolean().optional(),
   java_script_enabled: z.boolean().optional(),
   cookies: z.array(z.any()).optional(),
-  headers: z.record(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
   user_agent: z.string().optional(),
   user_agent_mode: z.string().optional(),
-  user_agent_generator_config: z.record(z.unknown()).optional(),
+  user_agent_generator_config: z.record(z.string(), z.unknown()).optional(),
   text_mode: z.boolean().optional(),
   light_mode: z.boolean().optional(),
   extra_args: z.array(z.string()).optional(),
@@ -74,7 +74,7 @@ const crawlerRunConfigSchema: z.ZodType<Partial<CrawlerRunConfig>> = z.object({
   disable_cache: z.boolean().optional(),
   no_cache_read: z.boolean().optional(),
   no_cache_write: z.boolean().optional(),
-  shared_data: z.record(z.unknown()).optional(),
+  shared_data: z.record(z.string(), z.unknown()).optional(),
   wait_until: z.string().optional(),
   page_timeout: z.number().int().positive().optional(),
   wait_for: z.string().optional(),
@@ -123,7 +123,7 @@ const crawlerRunConfigSchema: z.ZodType<Partial<CrawlerRunConfig>> = z.object({
   check_robots_txt: z.boolean().optional(),
   user_agent: z.string().optional(),
   user_agent_mode: z.string().optional(),
-  user_agent_generator_config: z.record(z.unknown()).optional(),
+  user_agent_generator_config: z.record(z.string(), z.unknown()).optional(),
 });
 
 const llmConfigSchema: z.ZodType<Partial<LLMConfig>> = z.object({
@@ -147,6 +147,13 @@ export const crawlRequestSchema = z.object({
   llm_config: llmConfigSchema.optional(),
 });
 
+// Export request schema
+export const exportRequestSchema = z.object({
+  format: z.enum(['json', 'csv', 'pdf']),
+  data: z.union([z.any(), z.array(z.any())]), // CrawlResult or CrawlResult[]
+  filename: z.string().optional(),
+});
+
 // Type inference for TypeScript
 export type CrawlRequestInput = z.infer<typeof crawlRequestSchema>;
 
@@ -156,7 +163,7 @@ export function validateCrawlRequest(data: unknown): { success: boolean; data?: 
   if (!result.success) {
     return {
       success: false,
-      error: result.error.errors.map(err => `${err.path.join('.')}: ${err.message}`).join(', ')
+      error: result.error.issues.map((err) => `${err.path.join('.')}: ${err.message}`).join(', ')
     };
   }
   return { success: true, data: result.data };
@@ -174,7 +181,7 @@ export function validateStatusCheck(data: unknown): { success: boolean; data?: S
   if (!result.success) {
     return {
       success: false,
-      error: result.error.errors.map(err => `${err.path.join('.')}: ${err.message}`).join(', ')
+      error: result.error.issues.map(err => `${err.path.join('.')}: ${err.message}`).join(', ')
     };
   }
   return { success: true, data: result.data };

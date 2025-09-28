@@ -183,6 +183,8 @@ async function generateExportFile(
   // Store file info for cleanup
   exportFiles.set(exportId, {
     filepath,
+    filename,
+    mimetype,
     created: Date.now()
   });
 
@@ -198,8 +200,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       requireAuth: true,
     });
 
-    if (validation instanceof NextResponse) {
-      return validation;
+    if (!validation.valid) {
+      return validation.response;
     }
 
     const body = validation.data;

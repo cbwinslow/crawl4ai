@@ -54,8 +54,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       requireAuth: true,
     });
 
-    if (validation instanceof NextResponse) {
-      return validation;
+    if (!validation.valid) {
+      return validation.response;
     }
 
     const { job_id: jobId } = validation.data;

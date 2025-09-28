@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { Loader2, Save, Play } from 'lucide-react';
 import { AVAILABLE_CRAWLERS, type CrawlerType } from '@/config/crawlers';
 import { useCrawlers } from '@/hooks/useCrawlers';
@@ -20,7 +20,7 @@ import { useCrawlers } from '@/hooks/useCrawlers';
 type CrawlerConfigFormProps = {
   crawlerId: string;
   onSuccess?: () => void;
-};\n
+};
 export function CrawlerConfigForm({ crawlerId, onSuccess }: CrawlerConfigFormProps) {
   const router = useRouter();
   const { toast } = useToast();
@@ -44,8 +44,8 @@ export function CrawlerConfigForm({ crawlerId, onSuccess }: CrawlerConfigFormPro
   // Create form schema based on crawler parameters
   const formSchema = z.object(
     crawler.parameters.reduce((schema, param) => {
-      let validator = z.any();
-      
+      let validator: z.ZodTypeAny = z.string();
+
       switch (param.type) {
         case 'string':
           validator = z.string();
@@ -57,13 +57,11 @@ export function CrawlerConfigForm({ crawlerId, onSuccess }: CrawlerConfigFormPro
           validator = z.boolean();
           break;
       }
-      
-      if (param.required) {
-        validator = validator.min(1, { message: 'This field is required' });
-      } else {
+
+      if (!param.required) {
         validator = validator.optional();
       }
-      
+
       return { ...schema, [param.name]: validator };
     }, {} as Record<string, z.ZodTypeAny>)
   );

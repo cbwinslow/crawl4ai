@@ -266,13 +266,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       requireAuth: true, // Require API key for crawl endpoint
     });
 
-    // If validation returns a NextResponse, it means there was an error
-    if (validation instanceof NextResponse) {
-      return validation;
+    if (!validation.valid) {
+      return validation.response;
     }
 
     // If we have data from validation, use it
-    const body = validation.data as CrawlRequest;
+    const body = validation.data;
 
     // Run crawl operation
     const result = await runPythonCrawl(body);
