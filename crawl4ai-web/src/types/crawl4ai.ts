@@ -337,6 +337,7 @@ export interface CrawlResponse {
   success: boolean;
   data?: CrawlResult;
   error?: string;
+  job_id?: string;
 }
 
 export interface BatchCrawlRequest {

@@ -4,6 +4,8 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs/promises';
 import { createJob, updateJobStatus, removeJob } from '../crawl/status/route';
+import { validateRequest } from '@/app/_middleware/validate-request';
+import { crawlRequestSchema } from '@/validations/crawl';
 
 // Types
 interface CrawlRequest {
@@ -257,25 +259,20 @@ async function runPythonCrawl(request: CrawlRequest): Promise<CrawlResponse> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const body: CrawlRequest = await request.json();
+    // Validate request with rate limiting
+    const validation = await validateRequest(request, {
+      schema: crawlRequestSchema,
+      rateLimit: true,
+      requireAuth: true, // Require API key for crawl endpoint
+    });
 
-    // Validate request
-    if (!body.url) {
-      return NextResponse.json(
-        { success: false, error: 'URL is required' },
-        { status: 400 }
-      );
+    // If validation returns a NextResponse, it means there was an error
+    if (validation instanceof NextResponse) {
+      return validation;
     }
 
-    // Validate URL format
-    try {
-      new URL(body.url);
-    } catch {
-      return NextResponse.json(
-        { success: false, error: 'Invalid URL format' },
-        { status: 400 }
-      );
-    }
+    // If we have data from validation, use it
+    const body = validation.data as CrawlRequest;
 
     // Run crawl operation
     const result = await runPythonCrawl(body);
